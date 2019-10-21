@@ -1,0 +1,518 @@
+1.快速认识线程
+    1.1 线程：
+        1）一个进程内部至少要有一个线程。
+        2）每一个线程都有自己的局部变量表、程序计数器以及各自的生命周期，当JVM启动的时候
+           从操作系统开始就会创建一个新的进程（JVM进程），JVM进程中将会派生或者创建很多线程
+    1.3 线程的生命周期：
+        NEW状态：
+            1）当new一个Thread对象时，它只是Thread对象的状态，在没有start之前，该线程不存在；
+            2）NEW状态通过start方法进入RUNNABLE状态；
+        RUNNABLE状态：
+            1）创建线程：线程调用start方法进入RUNNABLE，此状态下才会在JVM进程中创建了一个线程
+            2）调用：创建线程后不会被立即调用，而是等待CPU的调度
+            3）RUNNABLE的线程只能是意味被终止或者进入RUNNING状态，不会进入BLOCKED和TERMINATED状态
+        RUNNING状态：
+            1）前提：线程如果进入了RUNNING状态，说明CPU正在执行该线程
+            2）如何执行：CPU通过轮询或者其它方式从任务可执行队列中选中了线程，它才能执行逻辑代码
+            3）说明：一个RUNNING状态的线程事实上也是RUNNABLE状态，反之不成立
+            4）状态转换：
+                - 进入TERMINATED状态，比如调用stop方法
+                - 进入BLOCKED状态，比如调用了sleep或者wait方法而加入了waitSet中
+                - 进行某个组赛的IO操作，比如因网络数据的读写而进入了BLOCKED状态
+                - 获取某个锁资源，从而加入到该锁的阻塞队列中而进入了BLOCKED状态
+                - 由于CPU的调度器轮询使该线程放弃执行，进入了RUNNABLE状态
+                - 线程主动调用了yield方法，放弃CPU执行权，进入了RUNNABLE状态
+        BLOCKED状态：
+            1）前提：当进行某个组赛的IO操作，比如因网络数据的读写而进入了BLOCKED状态；
+                     获取某个锁资源，从而加入到该锁的阻塞队列中而进入了BLOCKED状态；
+            2）状态切换：
+                - 进入TERMINATED状态，调用stop方法
+                - 线程阻塞的操作结束，比如读取了想要的数据字节进入到RUNNABLE状态
+                - 线程完成了休眠时间，进入RUNNABLE状态
+                - Wait中的线程被其它线程通过notify/notifyall唤醒，进入RUNNABLE状态
+                - 线程获取到了某个锁资源，进入RUNNABLE状态
+                - 线程在阻塞过程中被打断，比如其它线程调用了interrupt方法，进入了RUNNABLE状态
+        TERMINATED状态：
+            1）前提：TERMINATED状态是线程的最终状态，它不会再切换到其它任何状态，进入该状态意味线程的生命周期结束
+            2）进入该状态的原因：
+                - 线程正常结束
+                - 线程运行出错意外结束，发生程序异常
+                - JVM Crash，导致所有的线程都结束
+    1.4 线程的start方法剖析：模板设计模式再Thread中的应用
+        Thread start方法源码
+            public synchronized void start() {
+                if (threadStatus != 0)
+                    throw new IllegalThreadStateException();
+
+                group.add(this);
+
+                boolean started = false;
+                try {
+                    start0();
+                    started = true;
+                } finally {
+                    try {
+                        if (!started) {
+                            group.threadStartFailed(this);
+                        }
+                    } catch (Throwable ignore) {
+                        /* do nothing. If start0 threw a Throwable then
+                          it will be passed up the call stack */
+                    }
+                }
+            }
+            private native void start0();
+
+        分析：
+            - 由线程执行的start方法可以看出，实际上调用的时start0()这个方法，而start0是一个JNI方法
+            - Thread被构造后的NEW状态，事实上threadStatus这个内部属性为0
+            - Thread不能被启动两次，否则抛出IllegalThreadStateException
+            - 线程启动后就是进入RUNNABLE状态，此时线程会被加入到ThreadGroup
+            - 一个线程被结束后（TERMINATED状态），没有办法回到RUNNABLE或者BLOCKED状态
+
+        模板设计模式在Thread中的应用
+            源码：
+                @Override
+                public void run() {
+                    if (target != null) {
+                        target.run();
+                    }
+                }
+            分析：
+                线程的真正执行逻辑是在run方法中，通常我们会把run方法称为线程的执行单元，如果没有使用Runnable接口
+                对其进行构造，则可以认为Thread的run方法是一个空实现，这种设计模式其实就是模板设计模式，因为无论是
+                自己new一个Thread线程还是通过实现Runnable接口都会对Run方法进行重写，但是关于Run方法在Thread中和时
+                调用则我们不需要关心
+
+2.深入理解Thread构造函数
+    2.2线程的父子关系
+        前提：由于Thread所有的构造函数最终都会调用一个init函数
+        源码：
+            private void init(ThreadGroup g, Runnable target, String name,
+                          long stackSize, AccessControlContext acc,
+                          boolean inheritThreadLocals) {
+                if (name == null) {
+                    throw new NullPointerException("name cannot be null");
+                }
+                this.name = name;
+                Thread parent = currentThread();    //获取当前线程座位父线程
+                SecurityManager security = System.getSecurityManager();
+        分析：
+            在线程的生命周期中，线程一开始为NEW状态，此时它只是一个Thread对象，它没有被创建出一个线程去执行，
+            只有Thread对象去执行了start方法的时候才会被Thread对象才会被创建出一个线程
+            - 一个线程的创建肯定由另一个线程完成的
+            - 被创建线程的父线程是创建它的线程
+
+    2.3 Thread与ThreadGroup
+        前提：在Thread的构造函数中，可以显式的指定线程的Group
+        源码：
+            Thread parent = currentThread();
+            SecurityManager security = System.getSecurityManager();
+            if (g == null) {
+                /* Determine if it's an applet or not */
+
+                /* If there is a security manager, ask the security manager
+                   what to do. */
+                if (security != null) {
+                    g = security.getThreadGroup();
+                }
+
+                /* If the security doesn't have a strong opinion of the matter
+                   use the parent thread group. */
+                if (g == null) {
+                    g = parent.getThreadGroup();
+                }
+            }
+        分析：在构造Thread对象的时候，如果Group为空则从父线程中获取一个Group，那么子线程会被加入到父线程的线程组
+
+    2.4 Thread于Runnable
+        Runnable是一个接口类，它只有一个抽象类方法 run，它被Thread对象继承，体现了模板设计模式
+            1）当我们创建一个Thread对象的时候，会直接重写它的run方法放入我们需要执行的业务代码
+            2）当我们创建一个类实现Runnable接口时，我们也需要重写Runnable的run接口
+
+    2.5 Thread于JVM虚拟机栈
+        JVM内存结构
+            - 程序计数器：
+                作用于存放当前线程接下来将要执行的字节码指令、分只、循环、跳转、处理异常等信息
+                CPU是通过不断切换线程来实现多线程，在单位时间内，一个CUP只能执行一个线程，它是
+                线程私有的
+            - Java虚拟机栈：
+                它是线程私有的，生命周期于线程相同，是在JVM运行时所创建的，在线程中，方法在执行
+                的时候都会创建一个名为栈帧（stack frame）的数据结构，主要用于存放局部变量表、
+                操作栈、动态链接、方法出口等信息，在每一个线程被创建的时候都会被创建一个虚拟机栈
+            - 本地方法栈：
+                它是线程私有的，Java中提供了调用本地方法的接口（Java Nactive Interface），也就
+                是c/c++程序，在线程执行过程层中，经常碰到调用JNI方法的情况，比如网络通信，文件操
+                作的底层，都不用JVM厂家来实现
+            - 堆内存：
+                它是被所有线程共享的，是JVM中最大的一块内存区域，被所有线程共享，Java在运行期间
+                创建的对象几乎都放在该内存区域，被成为"GC堆"，它一般被细分为新生代和老年代，更
+                细致的划分为Eden区、FromSurvivor区和To Survivor区。
+            - 方法区：
+                它是被所有线程共享的，主要用于存储已经被虚拟机加载的类信息、常量、静态变量、即时
+                编译器（JIT）编译后的代码等数据。
+            - Java8 元空间
+                在JDK1.7版本中的持久代内存区域，在1.8中该内存区域被元数据区域Mate Space取代，
+                元空间是堆内存的一部分，JVM为每个类加载器分配一块内存块列表，进行线性分配，块的
+                大小取决于类加载器的类型，sun/反射/代理对应的类加载器块会小一点，之前版本会单独
+                卸载回收某个类，而现在则是GC过程中发现某个类加载器已经具备回收条件，则将整个类加
+                载相关的元空间全部回收，这样就可以减少内存碎片，节省GC扫描和压缩的时间
+
+    2.6 守护线程
+        什么是守护线程：
+            1）守护线程是一类比较特殊的线程，一般用于处理后台的工作，比如JDK垃圾回收。
+            2）一个JVM进程中没有一个非守护线程，那么JVM会退出
+            3）守护线程具备自动结束生命周期的特性，而非守护线程不具备
+
+4.线程安全与数据同步
+    1.1 数据不一致问题原因分析
+        前面医院叫号问题，我们进行进一步的测试会发现以下问题：
+            1）号码被略过
+                线程的执行是由CPU时间轮询调度的，假设线程1和线程2都执行到了index=65的位置，其中线程2将
+                index设置为66之后未输出之前，CPU调度将执行器权利交给了线程1，线程1直接将其累计加到67，
+                那么66就被忽略了，所以线程2就不能输出了，它此时被忽略
+            2）号码重复出现
+                假设index=392，线程1执行index+1，然后CPU执行权交到线程2手里，由于线程1没有将index+1
+                赋值给index，所以此时index还是392，线程2此时执行index+1并赋值输出，所以线程1和线程2
+                都是392，所以出现了重复号码
+            3）号码超过了最大值
+                假设index=499，那么此时线程1进行判断，然后条件满足进入方法内，此时CPU调度轮换，然后
+                线程2进行判断，此时条件也满足进入方法内，此时CPU调度轮换，执行线程1，它index+1，输出
+                index=500，然后CPU调度轮换，线程2执行方法，此时它已经进入方法内，所以执行index+1，然后
+                输出index=501
+
+    番外：Java的同步机制，它实际上实现的原理其实是得基于操作系统上的同步机制去实现的，此后会涉及到一个叫做monitor的概念，
+          故此我们先了解一下什么是monitor，以及操作系统中系统是怎么去实现同步机制的
+        1.0 操作系统的同步机制
+            实现：
+                操作系统中在面对进程和线程的时，所支持的一些同步原语，其中semaphore 信号量和mutex 互斥量是最重要的同步原语
+                在使用基本的mutex进行并发控制时，需要程序员非常小心控制mutex的down和up操作，否则容易引起死锁问题。为了更加容易
+                编写出正确的并发程序，所以在mutex和semaphore的基础上，提出了更高层次的同步原语monitor，这个是属于编程语言的
+                范畴，操作系统本身并不支持monitor原语。
+            monitor特点：
+                同一个时刻，只有一个进程/线程能进入monitor中定义的临界区，这使得monitor能够达到互斥的效果。但仅仅有互斥的作用
+                是不够的，无法进入monitor临界区的 进程/线程，它们应该被阻塞，并且在必要的时候会被唤醒。
+            monitor基本元素：
+                monitor机制需要几个元素来配合：
+                    1）临界区
+                    2）monitor对象及锁
+                    3）条件变量以及定义在monitor对象上的wait, signal操作
+                    使用monitor机制的目的主要是为了互斥进入临界区，为了做到能够阻塞无法进入临界区的 进程/线程，还需要一个monitor
+                    object来协助，这个monitor object内部会有相应的数据结构，例如列表，来保存被阻塞的线程；同时由于monitor机制
+                    本质上是级域mutex这种基本原语的，所以monitor object还必须维护一个基于mutex的锁
+                    此外，为了在适当的时候能够阻塞和唤醒 进程/线程，还需要引入一个条件变量，这个条件变量用来决定什么时候是“适当
+                    的时候”，这个条件可以来自程序代码的逻辑，也可以是在monitor object内部，总而言之，程序员对条件变量的定义有很大
+                    的自主性。不过，由于monitor object内部采用了数据结构来保存被阻塞的队列，因此它也必须对外提供两个API来让线程
+                    进入阻塞状态以及之后被唤醒，分别是wait和notify
+                临界区的圈定：
+                    在计算机操作系统中 进程/线程在做同步操作时，会进行P/V操作，在进入临界区之前做P操作，离开临界区做V操作，P操作的
+                    目的是做互斥加锁，V操作的目的是释放锁。
+            Monitor Object：
+                Java语言中的java.lang.Object类，便是满足这个要求的对象，任何一个Java对象都可以作为monitor机制的monitor object。
+                Java对象存储在内存中，分别分为三个部分，即对象头、实例对象和对齐填充，而在其对象头中，保存了锁标识；同时，
+                java.lang.Object类定义了wait(),notify(),notifyAll()方法，这些方法的具体实现，依赖于一个叫ObjectMonitor模式的
+                实现，这是JVM内部基于C++实现的一套机制原理：
+                        当一个线程需要获取Object的锁时，会被放入EntrySet中进行等待，如果该线程获取到了锁，策划归纳为当前锁的owner。
+                    如果根据程序逻辑，一个已经获得了锁的线程缺少某些外部条件，而无法继续进行下去（例如生产者发现队列已满或者消费者
+                    发现队列为空），那么该线程可以通过调用wait方法将锁释放，进入wait set中阻塞进行等待，其它线程在这个时候有机会
+                    获得锁，去干其它事情，从而使得之前不成立的外部条件成立，这样先被阻塞的线程就可以重新进入EntrySet去竞争锁。这个
+                    外部条件在monitor机制中成为条件变量。
+            Synchronized实现原理
+                JVM基于进入和退出monitor对象来实现同步，同步代码块添加了monitorenter和monitorexit，同步方法使用ACC_SYNCHRONIZED
+                标记符隐式实现。每个对象都有一个monitor与之关联，运行到monitorenter时，尝试获取对应获取对应monitor的所有权，获取
+                成功就将monitor的进入数加1（所以是可重入锁，耶成为重量级锁），否则就阻塞，拥有monitor的线程运行到monitorexit是进入
+                数减1，为0时释放monitor。
+                Java中每个对象都有一个对象头，synchronized所用的锁就是存在对象头里的。
+                锁信息就存在前4个字节的MarkWord中，JVM对synchronized的加锁过程优化为：
+                    1.检测MarkWord里面是不是当前线程ID，如果是，表示当前线程处于偏向锁
+                    2.如果不是，则使用CAS将当前线程的ID替换MarkWord，如果成功则表示当前线程获得偏向锁，置偏向标志位1
+                    3.如果失败，则说明发生竞争，撤销偏向锁，进而升级为轻量锁
+                    4.当前线程使用CAS将对象头的MarkWord替换为锁记录指针，如果成功，当前线程获得锁
+                    5.如果失败，表示其它线程竞争锁，当前线程便尝试使用自旋来获取锁
+                    6.如果自旋成功则依然处于轻量级状态
+                    7.如果自旋失败，则升级为重量级锁
+                重量级锁是悲观锁的一种，自旋锁、轻量级锁与偏向锁属于乐观锁
+                CAS设计读取-比较-写入三个操作，是在CPU指令层面保证了其原子性，volatile是保证多线程下的内存可见性，二者需要配合使用
+                另外还需要注意CPU缓存行包含多个变量所带来的隐形同步问题：其中一个变量被volatile修饰，导致一个变量在另一个CPU核上
+                的读写也要被强制刷新缓存（这里指的时缓存一致性的问题）
+
+
+
+
+    1.2.1 什么是synchronized
+        说明：
+            synchornized关键字可以实现一个简单的策略来防止线程干扰和内存一致性错误，如果一个对象对多个线程是可见
+            的，那么该对象的所有读或写都将通过同步的方式来进行。
+        表现：
+            - synchronized关键字提供一种锁的机制，能够确保共享变量的互斥访问，从而防止数据不一致问题的出现
+            - synchronized关键字包括monitorenter和monitorexit两个JVM指令，它能够保证在任何时候任何线程执行到
+              monitorenter成功之前都必须从主内存中获取数据，而不是从缓存中，在monitorexit运行成功之后，共享
+              变量被更新后的值必须刷入到主内存
+            - synchronized的指令严格遵守Java happens-before规则，一个monitorexit指令之前必定有一个monitorenter
+    1.2.2 synchronized关键字的用法
+        说明：
+            synchronized可以用于代码块和方法进行修饰，而不能够用于对于class以及变量进行修饰
+        1）同步方法
+            [defualt|public|private|protected]synchronized[static]type method()
+        2）同步代码块
+            synchronized{}
+    1.3.1 深入synchronized关键字
+        1）线程堆栈分析：
+            synchronized关键字提供了一种互斥机制，也就是说在同一时刻，只能有一个线程访问同步资源，将它成为锁，
+            这种说法是不严谨的，准确的描述应该是某线程获取了mutex关联的monitor锁。
+        2）JVM指令分析
+            使用JDK命令javap对Mutex class进行反汇编，输出了大量的JVM命令，发现monitorenter和monitorexit是成对或
+            一个monitorenter对应多个monitorexit，但是每一个monitor出现之前必对应一个monitorenter。
+            JVM命令
+            public void accessResource();
+                code:
+                    0:getsatatic            ①获取MUTEX
+                    3:dup
+                    4:astore_1
+                    5:monitorenter          ②执行monitorenter JVM命令
+                    6:getstatic             //Field Java/util/concurrent/TimeUtil.MINUTES:Ljava/util/concurrent/TimeUnit
+                    9:ldc2_w
+                    12:invokvirtual         //Method java/util/concurrent/TimeUnit.sleep:(J)V
+                    15:goto             23  ③跳转到23行
+                    18:astore_2
+                    19:aload_2
+                    20invokevirtual
+                    23:aload_1              ④
+                    24:monitorexit          ⑤执行monitorexit JVM指令
+                    25:goto             33
+                    28:astore_3
+                    29:aload_1
+                    30:monitoexit
+                    31:aload_3
+                    31:athrow
+                    33:return
+            - Monitorenter:
+                每个对象都与一个monitor相关联，一个monitor的lock的锁只能被一个线程在同一时间获得，在一个线程尝试获得
+                在一个线程尝试获得与对象关联monitor的所有权会发生以下事情
+                - 如果monitor的计数器为0，则意味着该monitor的lock还没有被获得，某个线程获得之后将立即对计数器加一，
+                  从此该线程就是这个monitor的所有者
+                - 如果一个已经拥有该monitor所有权的线程重入，则会导致该monitor计算器再次累加
+                - 如果monitor已经被其他线程所拥有，则其他线程尝试获取该monitor的所有权，会被陷入阻塞状态知道monitor变成0，
+                  才能再次尝试获取对monitor的所有权
+            - Monitorexit
+                释放对monitor的所有权，想要释放对某个对象关联的monitor的所有权的前提是，你曾经获得了所有权。释放monitor
+                所有权的过程比较简单，就是将monitor的计数器减一，如果计数器的结果为0，那就意味着线程不再拥有对该monitor的
+                所有权，通俗的讲就是解锁。与此同时被该monitor blocked的线程，将尝试获取monitor的所有权。
+    1.3.3 使用synchronized需要注意的问题
+        1）与monitor关联的对象不能为空
+            private final Object mutex = null;
+            public void synMethod(){
+                synchronized(mutex){
+                    //
+                }
+            }
+            Mutedx对象为空，所以也就没有什么获得所有权一说了
+        2）synchronized作用域太大
+            由于synchronized关键字存在排他性，也就是说所有线程必须串行的经过synchronized的方法体，作用域越大，
+            则程序的效率越低，丧失了并发的优势
+
+            public void class Task implements Runnable{
+                @Override
+                public synchronized void run(){
+                    //
+                }
+            }
+        3）不同的monitor企图锁相同的方法
+            public static class Task implements Runnable{
+                private final Object MUTEX = new Object();
+                @Override
+                public void run(){
+                    //...
+                    synchronized(MUTEX){
+
+                    }
+                    //...
+                }
+            }
+            public static void mian(String[] args){
+                for(int i=0;i<5;i++){
+                    new Thread(Task::new).start();
+                }
+            }
+
+            上面的代码构造了5个线程，同时也构造了5个Runnable实例，Runnable作为线程逻辑执行单元传递给Thread，然后
+            你会发现，synchronized根本互斥不了与之对应的作用域，线程之间进行monitorlock的争抢只能发生在与monitor
+            关联的同一个引用上，上面的代码每一个线程争抢的monitor关联引用都是彼此独立的，因此不可能起到互斥的作用
+        4）多个锁的交叉导致死锁
+            多个锁的交叉很容易导致死锁的情况
+            private fianl Object MUTEX_READ = new Object();
+            private final Object MUTEX_MRITE = new Object();
+            public void read(){
+                synchronized(MUTEX_READ){
+                    synchronized(MUTEX_MRITE){
+                        //....
+                    }
+                }
+            }
+            public void write(){
+                synchronized(MUTEX_READ){
+                    sybchronized(MUTEX_MRITE){
+                        //...
+                    }
+                }
+            }
+
+    1.4
+        前提：多个线程争抢同一个monitor的lock会陷入阻塞进而达到数据同步、资源同步的目的
+    1.4.1
+        this monitor
+        代码：
+            public class ThisMonitor {
+                public synchronized void method1(){
+                    System.out.println(Thread.currentThread().getName()+" enter to method1");
+                    try{
+                        TimeUnit.SECONDS.sleep(10);
+                    }catch (InterruptedException e){
+                        e.printStackTrace();
+                    }
+                }
+                public synchronized void method2(){
+                    System.out.println(Thread.currentThread().getName()+" enter to method2");
+                    try{
+                        TimeUnit.SECONDS.sleep(10);
+                    }catch (InterruptedException e){
+                        e.printStackTrace();
+                    }
+                }
+                public static void main(String[] args) {
+                    ThisMonitor thisMonitor = new ThisMonitor();
+                    new Thread(thisMonitor::method1,"T1").start();
+                    new Thread(thisMonitor::method2,"T2").start();
+                }
+            }
+        分析：
+            在T1线程获取monitor的lock并且处于休眠状态，而T2线程企图获取monitor的lock时陷入了Blocked状态，
+            可见使用synchronized关键字同步类的不同实例方法，争抢的是同一个monitor的lock，而与之关联的引用
+            则是ThisMonitor的实例引用
+    1.4.2
+        class monitor
+        代码：
+            public class ClassMonitor {
+                public static synchronized void method1(){
+                    System.out.println(Thread.currentThread().getName()+" enter to method1");
+                    try{
+                        TimeUnit.SECONDS.sleep(10);
+                    }catch (InterruptedException e){
+                        e.printStackTrace();
+                    }
+                }
+                public static synchronized void method2(){
+                    System.out.println(Thread.currentThread().getName()+" enter to method2");
+                    try{
+                        TimeUnit.SECONDS.sleep(10);
+                    }catch (InterruptedException e){
+                        e.printStackTrace();
+                    }
+                }
+                public static void main(String[] args) {
+                    new Thread(ClassMonitor::method1,"T1").start();
+                    new Thread(ClassMonitor::method2,"T2").start();
+                }
+            }
+        分析：
+            此处和this monitor不一样的地方在于，它monitor的引用地址是当前Class的引用地址，所以method1和method2
+            引用的是同一个地址的monitor
+
+    总结：当某方法或者某代码块中有synchronized关键字的时候，则JVM在编译是会出现monitorenter和monitorexit这两个JVM
+    指令，一个monitorenter可能对应一个moniterexit或者对应多个monitorexit，但是一个monitorexit指令之前必定有一个
+    monitorenter指令。
+        当执行JVM指令monitorenter时，monitor对象会发生以下情况：
+        1）当线程获得了monitor所有权时，则monitor的lock加一；
+        2）当已获得monitor所有权的线程再次获取monitor所有权时，lock再次加一；
+        3）如果当前线程想要获取的monitor已经被其他线程获取所有权时，此时线程则会进入Blocked状态等待monitor的所有权
+           被释放；
+        当执行JVM指令monitorexit时，会发生以下情况：
+        前提：当前线程必须拥有monitor的所有权才能释放monitor所有权
+        1）当释放monitor的所有权时，则monitor的lock减一
+        2）当monitor的lock等于0时，说明该monitor已经被完全释放，它将被monitor Blocked状态的线程获取所有权
+    synchronized关键字修饰的方法 - 如果是静态方法，则monitor的引用地址为当前静态方法所在的类的地址。
+                                - 非静态方法，则monitor的引用地址为当前类的实例对象地址。
+5.线程死锁的原因以及如何诊断
+    1.1 程序死锁
+        1）交叉锁导致程序出现死锁
+            线程A持有R1的锁等待获取R2的锁，线程B持有R2的锁，等待获取R1的锁（典型哲学家吃面）
+        2）内存不足
+            当并发的内存不足时，会造成死锁，两个线程T1和T2，其中T1已经获得了10M的内存，T2获取了20M内存，那么此时，
+            程序执行需要30M内存，则两个线程都会等待彼此释放内存资源。
+        3）一问一答式的数据交换
+            服务端开启某个端口，等待客户端访问，客户端发送请立即等待接收，由于某种原因错过了客户端的请求，仍然在等待
+            一问一答的数据交换，此时服务端和客户端都在等待着双方发送数据
+        4）数据库锁
+            无论是数据库级别的锁，还是行级别的锁，比如某个线程执行了for update语句推出了事务，其他线程访问该数据库时
+            都将会陷入死锁
+        5）文件锁
+            同理，某线程获得了文件锁意外退出，其他读取该文件的线程也将会进入死锁知道系统释放文件句柄资源
+        6）死循环引起的死锁
+            程序由于代码原因或对某些异常处理不得当，进入了死循环，虽然查看线程堆栈信息不会发现任何死锁的迹象，但是程序
+            不工作，CPU占用率又高居不下，这种死锁一般成为系统假死，是一种最为致命的死锁现象，由于重现困难，进程对系统
+            资源的使用又达到了极限，想要做出dump有时候也是非常困难的
+    1.2 程序死锁举例
+
+5 线程间通信
+    1.0 同步阻塞与异步阻塞
+        前提：分析同步阻塞消息处理和异步非阻塞消息处理机制的优缺点
+    1.1 同步阻塞消息处理
+        案例：客户端提交Event至服务器，服务器接受请求之后开辟线程处理客户端请求，经过复杂处理以后将返回客户端
+        设计缺陷：
+            - 同步Event提交，客户端等待时间过长，会陷入阻塞，导致二次提交Event耗时过长
+            - 由于客户端提交的Event数量不多，导致系统同时受理业务数量有限，也就是系统整体的吞吐量不高
+            - 一个线程处理一个Event的方式，会导致出现频繁的创建开启与销毁，从而增加系统额外开销
+            - 当业务达峰值时候，大量的业务处理线程阻塞会导致频繁的CPU上下文切换，从而降低系统性能
+    1.2 异步非阻塞消息处理
+        案例：客户端提交了Event后得到一个相应的工单并且立即返回，Event则会被放置在Event队列中。服务端有若干个工作线程，
+        不断的从Event队列中获得任务并且进行异步处理，最后将处理结果保存至一个结果集中，如果客户端想要处理结果，则可以
+        凭工单号再次查询。
+        优势：客户端不用等到结果处理结束之后才能返回，从而提高了系统的吞吐量和并发量；其次若服务端的线程数量在一个可控的
+        范围之内是不会导致太多的CPU上下文切换从而带来的额外开销；
+
+    2.0 单线程间通信
+        前提：服务端有若干个线程会从队列中获取相对应的Event进行异步处理：一种是轮询；还有一种就是：如果队列中有Event，则
+        通知工作线程开始工作；没有Event，则工作线程休息并等待通知；
+    2.1 初识wait和notify
+        前提：线程和线程执行的对象是分开的，不能他们理解成一个东西，线程于需要执行对象必须关联的是"锁"，
+              也就是线程获取的锁对象的monitor对象，此概念在讲解什么是synchronized关键字的时候有详细的说明，后面的wait和notify等
+              方法都是基于一个实例对象或者类中都有一个monitor对象
+        队列Queue的三种状态：
+            - 队列满：最多可以容纳多少个Event，好比一个系统最多同时能够受理多少业务一样；
+            - 队列空：当所有的Event被处理并且没有新的Event被提交的时候，此时队列将是空的状态；
+            - 有Event但是没有满：有新的Event被提交，但是此时没有达队列的上限
+    2.2 wait和notify方法详解
+        1）wait的三个重载方法
+            - public final void wait() throws InterruptedException
+            - public final void wait(long timeout) throws InterruptedException
+            - public final void wait(long timeout,int nanos) throws InterruptedException
+                - wait方法的这个三个重载方法都将调用wait(long timeout)这个方法，wait()和wait(0)代表永远不超时
+                - Object的wait(long timeout)方法会导致当前线程进入阻塞，直到有其他线程调用了Object的notify或者notifyAll
+                  方法才能将其唤醒，或者阻塞时间到达了timeout时间自动唤醒
+                - wait方法必须拥有该对象的monitor，也就是wait方法必须在同步方法中使用
+                - 当前线程执行了该对象的wait方法之后，将会放弃该monitor的所有权并且进入与该对象关联的wait set中，也就是说
+                  一旦线程执行了某个Object的wait方法之后，它就是会释放对该对象的monitor的所有权，其他线程也会有机会继续
+                  争抢该monitor的所有权
+            - public final native void notify();
+                - 唤醒单个正在该对象wait方法的线程
+                - 如果有个某个线程由于执行该对象的wait方法而进入阻塞则会被唤醒，如果没有则会被忽略
+                - 被唤醒的线程需要重新获取对该对象所关联monitor的lock才能继续执行
+        2）wait和notify的注意事项
+            - wait方法是可中断方法，当前线程一旦调用了wait方法进入阻塞状态，其他线程是可以使用interrupt方法将其打断的；可中断
+              方法被打断后会收到中断异常InterruptException，同时interrupt标识也会被擦除
+            - 线程执行了某个对象的wait方法以后，会加入与之对应的wait set中，每一个对象的monitor都有一个与之关联wait set
+            - 当线程进入wait set之后，notify方法可以将其唤醒，也就是从wait set中弹出
+
+
+
+
+
+
+
+
+
+
+
+
+
+
