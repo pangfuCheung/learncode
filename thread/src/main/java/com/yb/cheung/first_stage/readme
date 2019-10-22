@@ -500,14 +500,166 @@
             - 线程执行了某个对象的wait方法以后，会加入与之对应的wait set中，每一个对象的monitor都有一个与之关联wait set
             - 当线程进入wait set之后，notify方法可以将其唤醒，也就是从wait set中弹出
 
+    4.0 自定义显示锁BooleanLock
+    4.1 synchronized关键字的缺陷
+            synchronized关键字提供了一种排他式的数据同步机制，某个线程在获取monitor lock的时候可能会被阻塞，而这种阻塞有两个明显的
+        缺陷：1.无法控制阻塞时长 2.阻塞不可被中断
+    4.2 显示锁BooleanLock
+        1）定义Lock接口
+            public interface Lock {
+                void lock() throws InterruptedException;
+                void lock(long mills) throws InterruptedException;
+                void unlock();
+                List<Thread> getBlockedThreads();
+            }
+            lock()方法永远被阻塞，除非获得锁，这一点与synchronized关键字相似，方法可被中断，中断时会抛出InterruptedException
+            lock(long mills)方法出了可被中断，还增加对应的超时功能
+            unlock()方法可用来进行锁的释放
+            getBlockedThreads()用于获取当前被阻塞线程
+        2）实现BooleanLock
+            BooleanLock是Lock的一个Boolean实现，通过控制一个Boolean变量的开关来决定是否允许当前线程获取该锁
 
+6.ThreadGroup详细讲解
+    1.ThreadGroup与Thread
+        默认情况下，新的线程都回被加入到main线程所在的group中
+    2.创建ThreadGroup
+        public ThreadGroup(String name)
+        public ThreadGroup(ThreadGroup parent, String name)
+    3.复制Thread数组和ThreadGroup数组
+        1）复制Thread数组
+            public int enumerate(Thread list[])
+            public int enumerate(Thread list[], boolean recurse)
+            上述两个方法，会将ThreadGroup中的active线程全部复制到Thread数组中，其中recurse参数如果为true，则该方法会将所有子group
+            中的active线程都递归到Thread数组中。
+            private int enumerate(Thread list[], int n, boolean recurse) {
+                int ngroupsSnapshot = 0;
+                ThreadGroup[] groupsSnapshot = null;
+                synchronized (this) {
+                    if (destroyed) {
+                        return 0;
+                    }
+                    int nt = nthreads;
+                    if (nt > list.length - n) {
+                        nt = list.length - n;
+                    }
+                    for (int i = 0; i < nt; i++) {
+                        if (threads[i].isAlive()) {
+                            list[n++] = threads[i];
+                        }
+                    }
+                    if (recurse) {
+                        ngroupsSnapshot = ngroups;
+                        if (groups != null) {
+                            groupsSnapshot = Arrays.copyOf(groups, ngroupsSnapshot);
+                        } else {
+                            groupsSnapshot = null;
+                        }
+                    }
+                }
+                if (recurse) {
+                    for (int i = 0 ; i < ngroupsSnapshot ; i++) {
+                        n = groupsSnapshot[i].enumerate(list, n, true);
+                    }
+                }
+                return n;
+            }
+        2）复制ThreadGroup数组
+            public int enumerate(ThreadGroup list[])
+            public int enumerate(ThreadGroup list[], boolean recurse)
+    4.2 ThreadGroup的interrupt
+            interrupt一个thread group会导致group中所有的active线程都被interrupt，也就是说该group中每一个线程的interrupt标识都被设置了
+                public final void interrupt() {
+                    int ngroupsSnapshot;
+                    ThreadGroup[] groupsSnapshot;
+                    synchronized (this) {
+                        checkAccess();
+                        for (int i = 0 ; i < nthreads ; i++) {
+                            threads[i].interrupt();
+                        }
+                        ngroupsSnapshot = ngroups;
+                        if (groups != null) {
+                            groupsSnapshot = Arrays.copyOf(groups, ngroupsSnapshot);
+                        } else {
+                            groupsSnapshot = null;
+                        }
+                    }
+                    for (int i = 0 ; i < ngroupsSnapshot ; i++) {
+                        groupsSnapshot[i].interrupt();
+                    }
+                }
+            分析：interrupt内部会执行所有thread的interrupt方法，并且会递归获取子group，然后执行它们各自的interrupt方法
+    4.3 ThreadGroup的destroy
+            destroy用于销毁ThreadGroup，该方法只是针对一个没有任何active线程的group进行一次destroy标记
+    4.4 守护ThreadGroup
+            线程可以设置守护线程，ThreadGroup也可以设置为守护ThreadGroup，但是若将一个ThreadGroup设置为daemon，也并不会影响线程的daemin属性，
+            如果设置为true，那么group中没有任何active线程的时候该group将自动destroy
+7 Hook线程以及捕获线程异常
+    1.获取线程运行时异常
+        public void setUncaughtExceptionHandler(UncaughtExceptionHandler eh)
+        - 为某个特定线程指定 UncaughtExceptionHandler
+        public static void setDefaultUncaughtExceptionHandler(UncaughtExceptionHandler eh)
+        - 设置全部的 UncaughtExceptionHandler
+        public UncaughtExceptionHandler getUncaughtExceptionHandler()
+        - 获取特定线程的UncaughtExceptionHandler
+        public static UncaughtExceptionHandler getDefaultUncaughtExceptionHandler()
+        - 获取全局的UncaughtExceptionHandler
+      1）UncaughtExceptionHandler的介绍
+            线程在执行单元中是不允许抛出checked异常的，这一点前文中已经有交代，而且线程运行在自己的上下文中，派生它的线程将无法直接获得它运行中的
+        异常信息。对此Java为我们提供了一个UncaughtExceptionHandler接口，当线程在运行过程中出现异常时，会回调UncaughtExceptionHandler接口，当线程
+        在运行过程中出现异常时，会回调UncaughtExceptionHandler接口，从而得知是哪个线程在运行时出错，以及出现了什么样的错误
+            @FunctionalInterface
+            public interface UncaughtExceptionHandler {
+                void uncaughtException(Thread t, Throwable e);
+            }
+        当线程在运行过程中出现异常时，JVM会调用dispatchUncaughtException方法，该方法会将对应的线程实例以及异常信息传递给回调接口。
+      2）UncaughtExceptionHandler的实例
+            public static void main(String[] args) {
+                // 1.设置回调接口
+                Thread.setDefaultUncaughtExceptionHandler((t,e)->{
+                    System.out.println(t.getName() + " occur exception");
+                    e.printStackTrace();
+                });
 
+                final Thread thread = new Thread(()->{
 
+                    try {
+                        TimeUnit.SECONDS.sleep(2);
+                    }catch (InterruptedException e){
+                    }
+                    // 2.这里会出现unchecked异常
+                    System.out.println(1/0);
+                },"Test-Thread");
 
+                thread.start();
+            }
+      3）UncaughtExceptionHandler的源码分析
+          public UncaughtExceptionHandler getUncaughtExceptionHandler() {
+              return uncaughtExceptionHandler != null ?
+                  uncaughtExceptionHandler : group;
+          }
+          分析：
+          - 该ThreadGroup如果有父ThreadGroup，则直接调用父Group的uncaughtException方法
+          - 如果设置了全局默认的UncaughtExceptionHandler，则调用UncaughtException方法
+          - 如果都没有设置，则会直接将异常的堆栈信息定向到System.err中
+            线程出现异常 → MainGroup → SystemGroup → System.err
+    2.1 Hook线程介绍
+            JVM进程的退出是由于JVM中没有活跃的非守护线程，或者收到了系统中断信号，向JVM程序注入一个Hook线程，在JVM进程退出的时候，或者收到了系统
+        中断信号，向JVM程序注入一个Hook线程，在JVVM进程退出的时候，Hook线程会启动执行，通过Runtime可以为JVM注入多个Hook线程
+    2.2 Hook线程实战
+        案例：为了防止某个程序被重复启动，在进程启动时会创建一个lock文件，进程收到中断信号的时候会删除这个lock文件，我们在mysql服务器、zookeeper、
+        kafka等系统中都能看到lock文件的存在
+        注意：
+            - Hook线程只有在收到退出信号的时候会被执行，如果在kill的时候使用了参数 -9，那么Hook线程不回得到执行，进程会立即退出，因此 .lock
+              文件将得不到清理。
+            - Hook线程中也可以执行一些资源释放的工作，比如关闭文件句柄、socket链接、数据库connection等。
+            - 不要在Hook中执行一些耗时非常长的操作，因为其会导致程序迟迟不能退出。
 
-
-
-
+    总结：这里主要是介绍了一个概念就是怎么处理线程的异常大概是分为两种：
+        1.一种是线程的异常：
+            父线程（就是派生出当前线程的线程）是无法catch到子线程的异常，所以这个时候需要一个能处理线程运行时异常的线程，此时这个线程就被成为Hook（钩子）
+            它是通过Runtime.getCurrentRunTime().setDefultUnCatchExceptionHandler(new Thread( ... ){})其实它就是通过设置一个新的Thread对象类去监听当前
+            线程，如果当前线程发生异常则执行UnCatchExceptionHandler中设置的线程的方法。
+        2.一种是程序
 
 
 

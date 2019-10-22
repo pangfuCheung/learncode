@@ -1,0 +1,112 @@
+MyBatis框架中事务管理方式
+
+一、什么是事务
+        事务就是数据库一个备份方案
+
+二、JDBC如何控制事务
+        /**
+        *   通知数据库，只要是这个通道推送过来的sql语句，当作一个整体来处理，只做一次备份
+        *   对于操作的结果是否是提交还是回滚由当前通道说了算
+        */
+        connection.setAutoCommit(false);
+
+        /**
+        *   提交批量sql语句，如果执行sql语句过程中出现异常，则整体回滚，如果没有异常则直接提交，事务一旦提交备份将会被全部销毁
+        */
+        try{
+            ps.addBatch();
+            con.commit();
+        }catch(Exception e){
+            conn.rollBack();
+        }
+
+三、MyBatis框架对于事务的管理方式：
+        【配置文件】：
+            <environment>
+                <!-- MyBatis框架中完成JDBC事务管理细节 -->
+                <transactionManager type="JDBC"/>
+                <!-- 把事务管理细节交给管理MyBatis框架的其它框架（Spring） -->
+                <transactionManager type="MANAGED"/>
+            </environment>
+
+        1.MyBatis框架中完成JDBC事务管理细节
+
+        2.把事务管理细节交给管理MyBatis框架的其它框架（Spring）
+
+四、Transaction接口：
+        //获取链接通道
+        Connection getConnection() throws SQLException;
+        //执行该方法时，有可能是关闭数据库链接，也有可能是把链接返回到数据库连接池中
+        void close() throws SQLException;
+        //事务提交
+        void commit() throws SQLException;
+        //事务回滚
+        void rollback() throws SQLException;
+        //获取超时时间
+        Integer getTimeout() throws SQLException;
+五、Transaction接口：
+        1.JdbcTransaction：MyBatis框架中完成JDBC事务管理
+            Connection connection;  //数据库链接通道
+            DataSource dataSource;  //数据库连接池
+            TransactionIsolationLevel level;    //事务四个隔离级别
+            boolean autoCommit; //判断是否connection控制提交还是由数据库自行控制提交
+
+        2.ManagedTransaction：把事务管理细节交给管理MyBatis框架的其它框架（Spring）
+            commit() rollback() 交给管理MyBatis的框架去实现
+--------------------------  乐观锁 -----------------------------
+一、乐观锁：
+        1.不是数据库中真实存在的锁
+        2.只是一种假设情况。认为多线程查询过程中不会出现问题，只有在多线程对表进行修改有可能出现
+
+二、乐观锁实现方案：
+
+        1.在表中增加一个字段【数据行被修改的次数】
+          当两个会话（线程）查询时得到当前数据行全部内容
+          当其中一个会话对数据行进行修改时，自动更新被修改次数
+          同时在更新语句中被修改的次数要座位定位条件
+          此时另一个会话要进行更新导致更新失败
+
+          sqlSession = sqlSessionFactory.openSession();
+          GoodsDao dao = sqlSession.getMapper(GoodsDao.class);
+          sqlSession2 = sqlSessionFactory.openSession();
+          GoodsDao dao2 = sqlSession2.getMapper(GoodsDao.class);
+
+          //1.查询编号为1的商品
+          Goods goods1 = dao.findById(10);
+          Goods goods2 = dao2.findById(10);
+
+          //2.通过会话session将商品1下架
+          goods1.setStatus(2);
+          dao.updateGoods(goods1);
+          sqlSession.commit();
+
+          //3.通过会话（线程）session2修改商品的名称
+          goods2.setName("11");
+          dao2.updateGoods(goods2);
+          sqlSession2.commit();;
+
+            update dept set dname = ? where deptno = ? and [修改次数] = ?
+
+        2.在表中增加一个字段（时间戳），与version相同
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

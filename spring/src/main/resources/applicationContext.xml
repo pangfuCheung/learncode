@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans>
+   
+     <bean id="dept" class="com.yb.cheung.spring_di.bean.Dept" scope="sss">
+        <property name="deptno" value="10"></property>
+        <property name="dname" value="开课吧"></property>
+     </bean>
+     
+     <bean id="myDao" class="com.yb.cheung.spring_di.dao.DeptDao" scope="single"></bean>
+
+     <bean id="myService" class="com.yb.cheung.spring_di.service.DeptService" scope="single">
+        <property name="dao" ref="myDao"></property>
+     </bean>
+
+</beans>

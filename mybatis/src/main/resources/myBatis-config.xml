@@ -3,20 +3,39 @@
   PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
   "http://mybatis.org/dtd/mybatis-3-config.dtd">
 <configuration>
- 
- 
- <!-- 设置导入外部properties文件位置 -->
- <properties resource="config.properties"></properties>
- 
- <!-- 为每一个实体类设置一个具体别名 -->
-   <typeAliases>
-    <typeAlias type="com.yb.cheung.demo.bean.Dept" alias="Dept"/>
- </typeAliases>
+    <!-- 设置导入外部properties文件位置 -->
+    <properties resource="config.properties"></properties>
+
+
+    <settings>
+        <!-- 设置MyBatis的二级缓存 -->
+        <setting name="cacheEnabled" value="true"/>
+        <!-- 设置打印sql语句 -->
+        <setting name="logImpl" value="STDOUT_LOGGING" />
+    </settings>
+
+    <!-- 为每一个实体类设置一个具体别名 -->
+    <typeAliases>
+        <typeAlias type="com.yb.cheung.demo.bean.Dept" alias="Dept"/>
+    </typeAliases>
+
  <!-- 为当前包下的每一个类设置一个默认别名 -->
 <!-- <typeAliases>
    <package name="com.yb.cheung.demo.bean"/>
  </typeAliases>-->
- 
+
+    <!--<plugins>
+        <plugin interceptor="com.yb.cheung.mybatis.interceptor.OneInterceptor">
+            <property name="driver" value="123"></property>
+        </plugin>
+        <plugin interceptor="com.yb.cheung.pattern.mutilproxy.TangLangAgent">
+        </plugin>
+        <plugin interceptor="com.yb.cheung.pattern.mutilproxy.HuangQueAgent">
+        </plugin>
+    </plugins>-->
+
+
+
   <environments default="development">
     <environment id="development">
       <transactionManager type="JDBC"/>
@@ -27,10 +46,11 @@
         <property name="password" value="${jdbc.password}"/>
       </dataSource>
     </environment>
-    
+
   </environments>
- 
+
   <mappers>
       <mapper resource="mapper/DeptDao.xml"></mapper>
+      <mapper resource="mapper/GoodsDao.xml"></mapper>
   </mappers>
 </configuration>

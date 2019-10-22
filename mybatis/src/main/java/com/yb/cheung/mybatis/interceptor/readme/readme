@@ -1,0 +1,127 @@
+ParameterHandler参数处理器：
+
+一、介绍：
+    1.ParameterHandler是一个接口
+    2.ParameterHandler接口作用是为【PreparedStatement】和【CallableStatement】的输送sql语句中占位符进行赋值处理
+
+二、接口关键的方法
+    Object getParameterObject(); 读取程序执行sql语句，开发人员提供的参数
+    setParameters(PreparedStatement ps); 作用就是负责将参数内容设置到数据库操作对象中输送sql语句的占位符
+                                         ps.setInt(占位符位置,参数内容);
+
+三、ParameterHandler接口的实现
+        DefaultParameterHandler
+
+四、DefaultParameterHandler实现类属性介绍
+    /**
+    * 类型转换注册器，作用：映射java的数据类型和数据库数据类型的关系
+    */
+    private final TypeHandlerRegistry typeHandlerRegistry;
+    /**
+    * 映射sql语句与数据库操作对象的映射关系
+    * 以及sql关联的sql标签信息
+        例子：
+        <select id="findAll" resultType="com.yb.cheung.ibatis.bean.Dept">
+              select * from dept
+        </select>
+    */
+    private final MappedStatement mappedStatement;
+    /**
+    * 存储的需要进行赋值参数内容
+    */
+    private final Object parameterObject;
+    /**
+    * 输送的具体的sql语句
+    */
+    private BoundSql boundSql;
+    /**
+    * 包含mybatis框架【核心配置文件信息】和【sql映射文件】的信息
+    */
+    private Configuration configuration;
+
+五、参数处理器被创建时机
+    ParameterHandler（参数处理器）在statementHandler被创建时被创建
+
+    public ParameterHandler newParameterHandler(MappedStatement mappedStatement, Object parameterObject, BoundSql boundSql) {
+        ParameterHandler parameterHandler = new DefaultParameterHandler(mappedStatement, parameterObject, boundSql);
+        //interceptorChain拦截器链条对象处理器，由于参数处理器中有需要执行的具有占位符的sql语句【BoundSql对象】
+        //和开发人员给改sql赋值的参数【ParameterObject对象】，该拦截器中体现了多级代理的设计模式
+        //以ParameterHandler为例子，在myBatis中四大神器的创建之后都会被放进【interceptorChain.pluginAll】拦截器的这个方法后
+        //创建返回，而这个拦截器链就是mybatis插件开发的体现。由于它是多级代理的体现，所以它返回的方法并不是ParameterHandler这个实体类
+        //而是一个代理监听对象，多级代理的概念【螳螂扑蝉，黄雀在后】，蝉就是相当于parameterHandler对象，当它某个
+        //方法被执行时，它会触发其它拦截器类【Interceptor】的执行。
+        ParameterHandler parameterHandler = (ParameterHandler)this.interceptorChain.pluginAll(parameterHandler);
+        return parameterHandler;
+    }
+
+六、参数处理器得到参数内容是从哪里得到的
+    在接口式编程时，当接口执行方法的时候，接口的传参是怎么得到的?
+    Dao dao = sqlSession.getMapper(Dao.class);
+    dao.findById(10);
+    由于dao是一个接口它没有实现类，当dao执行findById的方法的时候，它会跑到它的代理实现类【MapperProxy，它继承InvocationHandler的对象】中的invoke方法里，
+    而invoke方法参数就有一个Object[] args
+
+
+------------------------------------------- 分割线 -----------------------------------------------------------------
+一、ResultSetHandler结果处理器
+
+        /**
+        *   将数据库操作接口映射成Java对象
+        */
+        List handleResultSets(Statement var1) throws SQLException;
+
+        /**
+        *   处理存储过程
+        */
+        void handleOutputParameters(CallableStatement var1) throws SQLException;
+
+二、ResultSetHandler接口主要方法
+
+        handleResultSets(Statement var1)
+
+------------------------------------------ 分割线 -------------------------------------------
+                                    MyBatis插件开发
+一、【MyBatis插件开发】本质：
+            JDK动态代理设计模式的封装版
+
+二、【MyBatis插件开发】作用：
+            监听MyBatis中四大神器的行为，在四大神器运行时进行代码植入
+
+三、【MyBatis作者给开发人员留下的后门】：
+
+        通过源代码可以发现，四大神器对象创建几乎涉及到一个方法
+        interceptorChain.pluginAll(四大神器对象)
+
+        ParameterHandler的创建
+            ParameterHandler parameterHandler = (ParameterHandler)this.interceptorChain.pluginAll(parameterHandler);
+
+        ResultSetHandler的创建
+            ResultSetHandler resultSetHandler = (ResultSetHandler)this.interceptorChain.pluginAll(resultSetHandler);
+
+        StatementHandler的创建
+            StatementHandler statementHandler = (StatementHandler)this.interceptorChain.pluginAll(statementHandler);
+
+        Executor的创建
+            Executor executor = (Executor)this.interceptorChain.pluginAll(executor);
+
+四、pluginAll(四大神器)方法：
+
+        public Object pluginAll(Object target) {
+            Interceptor interceptor;
+            for(Iterator i$ = this.interceptors.iterator(); i$.hasNext(); target = interceptor.plugin(target)) {
+                interceptor = (Interceptor)i$.next();
+            }
+
+            return target;
+        }
+        将四大神器某一个实例对象交给【Interceptor】管理返回【代理对象】
+
+五、Interceptor接口作用：
+        拦截器接口，通过实现这个接口开发人员可以对四大神器对象进行监控处理
+
+六、如何开发自己的拦截器【也就是常说的插件】
+        1.开发一个Interceptor接口实现类
+        2.需要重写Interceptor接口方法
+        3.在mybatis框架通过核心配置拦截器
+        4.需要通过@Intercepts指定当前拦截器监听的神器类型和行为
+

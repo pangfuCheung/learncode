@@ -1,0 +1,124 @@
+Spring的本质：代理模式
+
+    1.IOC容器：对象的管理，spring称对象为bean
+
+        1）创建对象
+        2）初始化对象
+        3）创建对象的次数（数量）
+        4）依赖注入
+        5）IOC容器关闭以后，切断IOC容器跟bean的关系，实际不会销毁bean
+
+    2.AOP容器：代理模式（JDK和CGLB）当IOC容器需要生成Bean对象的时候，AOP容器通过代理生成Bean然后再对Bean进行监听
+
+---------------------------- Spring IOC 容器注解式开发 ------------------------------------
+
+一、什么是IOC：控制反转；开发人员所需要的bean，它的创建、初始化和销毁操作都由spring来管理
+
+二、bean和组件：
+        【组件】：委托Spring框架进行管理的JAVA类
+        【bean】：实类对象，是在spring框架被管理的实例对象
+
+三、Spring IOC容器实现功能：
+        1.动态组件注册。
+        2.bean对象的初始化管理
+        3.依赖注入（di）
+        4.bean对象初始化前后，进行次要业务的组装
+四、@Configuration：
+        1.【作用】：可以将一个Java类修饰为一个【配置文件】，在这个Java类进行组件的注册
+
+五、组件注册：
+        1.@Bean
+            【介绍】：
+                1）Spring框架提供注解
+                2）@Bean将一个Java类交给Spring管理
+                3）@Bean要在【配置类】使用
+            【特征】：
+                1）默认时，以@Bean来修饰的bean对象对应的关键字（key）是【方法名】
+                2）如果在@Bean中指定bean对象对应关键@Bean(value={"stu1","stu2"})
+                   此时bean对象对应的关键字（key）是stu1或stu2
+                3）所有通过@Bean修饰生成的bean对象默认的情况下都是单例
+                4）对于单例的bean对象，可以通过@Lazy延缓对象被创建的时机
+
+        2.@ComponentScan：指定某个包路径下的所有类
+            【介绍】：
+                1）spring框架提供注解
+                2）自动将指定包下的【类】加载到Spring容器，但是不是所有的类都被注册
+                    (@Controller @Service @Resposity)
+                3）@ComponentScan 要在【配置类】使用
+            【特征】：
+                1）可以将某些类排除在Spring容器之外
+                2）指定某些类加载到Spring容器
+            【FilterType】：扫描过滤策略
+                @ComponentScan.Filter(
+                    //1.type表示按照注解类进行过滤  value表示指定类被过滤，不加载到Spring容器中
+                    type = FilterType.ANNOTATION,value = {Controller.class, Service.class}
+                    //2.表示只加载指定的类型的类进行过滤
+                    type = FilterType.ASSIGNABLE_TYPE,value = {DeptDao.class}
+                    //3.根据ASPECTJ表达式过滤
+                    //4.根据正则表达式过滤
+                    //5.根据开发人员自定义的规则进行过滤
+                )
+            【自定义扫描规则】
+                1）在@ComponentScan(value="包路径",excludeFilter={
+                                                    @Filter(type = FilterType.CUSTOM ,value = {
+                                                        自定义规则类.class
+                                                    })
+                                                })
+
+        3.@Conditional：条件注册，判断当前类有没有满足条件创建类
+            【介绍】：
+                1）spring框架提供注解
+                2）动态的决定当前Java类是否有资格添加到Spring容器中
+                3）在配置类中使用
+                    例子： 1.如果当前环境是window环境则注册Student
+                           2.如果当前环境是Linux环境则注册Teacher
+
+        4.FactoryBean接口
+
+        5.@Import
+            【介绍】：如果一个类没有任何注解，而且也没有在configuration中声明
+            【使用方式】：
+                1）@Import({"one.class","two.class"})
+                2）@Import(ImportSelector接口的实现类) 返回需要添加的类的路径
+                3）@Import({自定义Bean对象注册实现类(ImportBeanDefinitionRegistrar)})，
+                    可以直接将类注册到Spring容器中
+
+六、bean对象的赋值
+        1.在当前类中指定属性上赋值：
+            @Value：
+                基本数据
+                SPEL
+                外部属性文件
+        2.为工程所有的类的指定属性赋值【BeanPostProcessor（后置处理器）】
+          BeanPostProcessor接口的【自定义实现类】可以在当前Spring容器所有的Bean对象【初始化】前后调用
+          【BeanPostProcessor（后置处理器）工作原理】
+
+七、Bean对象的生命周期监控
+
+八、BeanPostProcesser【源码分析】
+
+九、自动装配
+        @AutoWried
+
+        Aware接口
+
+--------------------------------- IOC容器 -------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
